@@ -1,7 +1,9 @@
 #pragma once
 #include "Usings.h"
 
-//A LevelInfo object bundles a price with quantity of orders at that level
+/*A LevelInfo bundles a price with total quantity of the security across
+  all orders at that price level*/
+  
 struct LevelInfo 
 {
     Price price_; 

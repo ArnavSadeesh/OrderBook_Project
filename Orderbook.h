@@ -9,206 +9,90 @@
 #include "Trades.h"
 #include "Usings.h"
 
-
 class OrderBook
 { 
     private: 
+        /* Bundles an order with its location to enable O(1) 
+        access within its level list*/
         struct OrderEntry
         {
             OrderPointer order_{ nullptr }; 
             OrderPointers::iterator location_; 
         };
+
+        /* Metadata with quantity of financial product and 
+        order count at each level */
+        struct LevelData
+        {
+            Quantity quantity_{ }; 
+            Quantity orderCount_{ }; 
+            
+            //Encapsulating actions that alter LevelData
+            enum class Action
+            { 
+                Add, 
+                Remove, 
+                Match
+            }
+        }
         
+        std::unordered_map<Price, LevelData> data; 
         std::map<Price, OrderPointers, std::greater<Price>> bids_; 
         std::map<Price, OrderPointers> asks_; 
         std::unordered_map<OrderId, OrderEntry> orders_; 
 
-        //Returns whether an order of 'side' with 'price' can be matched for a trade
-        bool CanMatch(Side side, Price price) const 
-        { 
-            if (side == Side::Buy) { 
-                if (asks_.empty())
-                    return false; 
-                
-                const auto& [bestAsk, _] = *asks_.begin(); 
-                return price >= bestAsk;  
-            }
-            else 
-            { 
-                if (bids_.empty())
-                    return false; 
-                
-                const auto& [bestBid, _] = *bids_.begin(); 
-                return price <= bestBid;    
-            }
-        }
+        mutable std::mutex ordersMutex_; 
+        std::thread orderPruningThread_; 
+        std::condition_variable shutdownConditionVariable_; 
+        std::atomic<bool> shutdown_ { false }; 
 
-        /*Matches as many bid/ask orders as possible and returns resulting trades*/
-        Trades MatchOrders()
-        {  
-            Trades trades; 
-            trades.reserve(orders_.size()); 
+        /*A pruning clock that cancels GoodForDay orders at 4PM every day, designed to run on its own thread*/
+        void PruneGoodForDayOrders();
 
-            while (true) {
-                if (bids_.empty() || asks_.empty())
-                    break; 
-                auto&  [bidPrice, bids] = *bids_.begin(); 
-                auto&  [askPrice, asks] = *asks_.begin(); 
+        /*Allows efficient bulk cancellation, for internal use*/
+        void CancelOrders(OrderIds orderIds);
 
-                if (bidPrice < askPrice)
-                    break; 
-                
-                while (bids.size() && asks.size()) {
-                    auto& bid = bids.front(); 
-                    auto& ask = asks.front(); 
+        /*Primary cancel function intended to be called only through other
+        thread-safe functions*/
+        void CancelOrderInternal(OrderId orderId);
 
-                    Quantity quantity = std::min(bid->GetRemainingQuantity(), 
-                    ask->GetRemainingQuantity()); 
+        /*APIs to update LevelData upon an order action*/
+        void Orderbook::OnOrderAdded(OrderPointer order); 
+        void Orderbook::OnOrderCancelled(OrderPointer order); 
+        void Orderbook::OnOrderMatched(Price price, Quantity quantity, 
+        bool isFullyFilled); 
+        void Orderbook::UpdateLevelData(Price price, Quantity quantity, LevelData::Action action);
+        
 
-                    bid->Fill(quantity); 
-                    ask->Fill(quantity); 
+        /*APIs to return whether an order can be matched for a trade or 
+        fully filled across one or more trades*/
+        bool CanMatch(Side side, Price price) const; 
+        bool Orderbook::CanFullyFill(Side side, Price price, Quantity quantity) const
 
-                    if (bid->IsFilled()) { 
-                        bids.pop_front(); 
-                        orders_.erase(bid->GetOrderId()); 
-                    }
+        /*Matches as many bid/ask orders as possible and returns 
+        resulting trades*/
+        Trades MatchOrders(); 
 
-                    if (ask->IsFilled()) { 
-                        asks.pop_front(); 
-                        orders_.erase(ask->GetOrderId()); 
-                    }
-                    //Quantity should be part of Trade constructor 
-                    trades.push_back(Trade{ 
-                        TradeInfo {
-                            bid->GetOrderId(), bid->GetPrice(), quantity
-                        }, 
-                        TradeInfo{
-                            ask->GetOrderId(), ask->GetPrice(), quantity, 
-                        }
-                    }); 
-                }
-                if (bids.empty())
-                    bids_.erase(bidPrice); 
-                else
-                    asks_.erase(askPrice); 
-            }
-
-            if (!bids_.empty()) { 
-                auto& [_, bids] = *bids_.begin(); 
-                auto& order =  bids.front(); 
-                if (order->GetOrderType() == OrderType::FillAndKill)
-                    CancelOrder(order->GetOrderId()); 
-            }
-
-            if (!asks_.empty()) { 
-                auto& [_, asks] = *asks_.begin(); 
-                auto& order =  asks.front(); 
-                if (order->GetOrderType() == OrderType::FillAndKill)
-                    CancelOrder(order->GetOrderId()); 
-            }
-            return trades; 
-        }
 
     public: 
-        //Adds order to the orderbook and returns Trades resulting from the addition
-        Trades AddOrder(OrderPointer order)
-        { 
-            if (orders_.contains(order->GetOrderId()))
-                return { }; 
-            
-            if (order->GetOrderType() == OrderType::FillAndKill
-                && !CanMatch(order->GetSide(), order->GetPrice()))
-                    return { }; 
-            
-            OrderPointers::iterator iterator; 
-
-            if (order->GetSide() == Side::Buy) 
-            { 
-                auto& orders = bids_[order->GetPrice()]; 
-                orders.push_back(order); 
-                iterator = std::next(orders.begin(), orders.size()-1); 
-            } 
-            else 
-            { 
-                auto& orders = asks_[order->GetPrice()]; 
-                orders.push_back(order); 
-                iterator = std::next(orders.begin(), orders.size()-1); 
-            }
-            
-            orders_[order->GetOrderId()] = OrderEntry { order, iterator }; ; 
-
-            return MatchOrders(); 
-        }
-
-        //Removes order with orderId from orderbook
-        void CancelOrder(OrderId orderId) 
-        { 
-            if (!orders_.contains(orderId))
-                return; 
         
-            const auto [order, orderLocation] = orders_[orderId];  
-            orders_.erase(orderId); 
-
-            if (order->GetSide() == Side::Buy) 
-            { 
-                auto& ordersAtPrice = bids_[order->GetPrice()]; 
-                ordersAtPrice.erase(orderLocation); 
-                if (ordersAtPrice.empty())
-                    bids_.erase(order->GetPrice()); 
-            }  
-            else 
-            { 
-                auto& ordersAtPrice = asks_[order->GetPrice()]; 
-                ordersAtPrice.erase(orderLocation); 
-                if (ordersAtPrice.empty())
-                    bids_.erase(order->GetPrice()); 
-            }
-        }
-        /*Takes in an OrderModify object order to find and remove original 
-        version and add the modified order. Returns Trades made as a result 
-        of the addition*/
-        Trades ModifyOrder(OrderModify order) 
-        { 
-            if (!orders_.contains(order.GetOrderId()))
-                return { }; 
+        Orderbook();
+        ~Orderbook(); 
         
-            const auto& [existingOrder, _] = orders_[order.GetOrderId()]; 
-            CancelOrder(order.GetOrderId()); 
-            return AddOrder(order.ToOrderPointer(existingOrder->GetOrderType()));
-        }
+
+
+        /*Adds order and returns any resulting Trades*/
+        Trades AddOrder(OrderPointer order); 
+      
+        void CancelOrder(OrderId orderId); 
+
+        /*Takes in an OrderModify object to find and cancel old order, 
+        re-adding the modified version. Returns any resulting Trades*/
+        Trades ModifyOrder(OrderModify order); 
 
         std::size_t Size() const { return orders_.size(); }
         
         //Returns compilation of orderbook's current bid/ask information  
-        OrderbookLevelInfos GetOrderInfos() const 
-        { 
-            LevelInfos bidInfos, askInfos; 
-            bidInfos.reserve(orders_.size()); 
-            askInfos.reserve(orders_.size()); 
-            
-            //Generic function to create LevelInfo for a price level
-            auto CreateLevelInfo = [](Price price, const OrderPointers& orders)
-            { 
-                return LevelInfo
-                { 
-                price,
-                std::accumulate(orders.begin(), orders.end(), Quantity(0), 
-                                [](Quantity runningSum, const OrderPointer& order)
-                                {
-                                    return runningSum + order->GetRemainingQuantity(); 
-                                })
-                }; 
-            }; 
-
-            for (const auto& [price, orders] : bids_)
-                bidInfos.push_back(CreateLevelInfo(price, orders));
-            
-            for (const auto& [price, orders] : asks_)
-                askInfos.push_back(CreateLevelInfo(price, orders));
-
-
-            return OrderbookLevelInfos { bidInfos, askInfos }; 
-
-        }
-
+        OrderbookLevelInfos GetOrderInfos() const; 
+    
 }; 
