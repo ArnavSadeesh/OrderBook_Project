@@ -78,8 +78,10 @@ class OrderBook
         
         Orderbook();
         ~Orderbook(); 
-        
-
+        Orderbook(const Orderbook&) = delete; 
+        void operator=(const OrderBook&) = delete; 
+        Orderbook(Orderbook&&) = delete; 
+        void operator=(Orderbook&& orderbook) = delete; 
 
         /*Adds order and returns any resulting Trades*/
         Trades AddOrder(OrderPointer order); 
