@@ -262,6 +262,8 @@ Orderbook::~Orderbook()
 
 Trades Orderbook::AddOrder(OrderPointer order)
 { 
+    std::scoped_lock<mutex> ordersLock{ ordersMutex_ }; 
+
     if (orders_.contains(order->GetOrderId()))
         return { }; 
     
@@ -328,24 +330,35 @@ version and add the modified order. Returns Trades made as a result
 of the addition*/
 Trades Orderbook::ModifyOrder(OrderModify order) 
 { 
-    if (!orders_.contains(order.GetOrderId()))
-        return { }; 
+    OrderType orderType; 
+    {
+        std::scoped_lock<mutex> ordersLock{ ordersMutex_ }; 
 
-    const auto& [existingOrder, _] = orders_[order.GetOrderId()]; 
+        if (!orders_.contains(order.GetOrderId()))
+            return { }; 
+
+        const auto& [existingOrder, _] = orders_[order.GetOrderId()]; 
+        existingOrderType = existingOrder->GetOrderType(); 
+    }
+
     CancelOrder(order.GetOrderId()); 
-    return AddOrder(order.ToOrderPointer(existingOrder->GetOrderType()));
+    return AddOrder(order.ToOrderPointer(orderType));
 }
 
 
-std::size_t Orderbook::Size() const { return orders_.size(); }
+std::size_t Orderbook::Size() const 
+{   
+    std::scoped_lock<mutex> ordersLock{ ordersMutex_ }; 
+    return orders_.size(); 
+}
    
 
 //Returns compilation of orderbook's current bid/ask information  
 OrderbookLevelInfos Orderbook::GetOrderInfos() const 
 { 
     LevelInfos bidInfos, askInfos; 
-    bidInfos.reserve(orders_.size()); 
-    askInfos.reserve(orders_.size()); 
+    bidInfos.reserve(Size()); 
+    askInfos.reserve(Size()); 
     
     //Generic function to create LevelInfo for a price level
     auto CreateLevelInfo = [](Price price, const OrderPointers& orders)
@@ -354,7 +367,7 @@ OrderbookLevelInfos Orderbook::GetOrderInfos() const
         { 
         price,
         std::accumulate(orders.begin(), orders.end(), Quantity(0), 
-                        [](Quantity runningSum, const OrderPointer& order)
+                        [](Quantity runningSum, const auto& order)
                         {
                             return runningSum + order->GetRemainingQuantity(); 
                         })
