@@ -1,5 +1,5 @@
 #include "pch.h" 
-#include "Orderbook.h"       
+#include "Orderbook.h"    
 
 enum class ActionType
 { 
@@ -98,6 +98,8 @@ using Actions = std::vector<Action>;
             }
             else 
                 return false; 
+            
+            return true; 
         }
 
         Side ParseSide(const std::string_view& str) const 
@@ -137,7 +139,7 @@ using Actions = std::vector<Action>;
         Quantity ParseQuantity(const std::string_view& str) const 
         { 
             if (str.empty())
-                throw std::logic_error("Invalid Quantity"); 
+                throw std::logic_error(std::format("Invalid Quantity: {}", str));  
 
             return ToNumber(str); 
         }
@@ -152,8 +154,8 @@ using Actions = std::vector<Action>;
 
     public: 
         
-        std::tuple<Actions, Result> GetActions(
-            const std::filesystem& path) const
+        std::tuple<Actions, Result> GetInputInfo(
+            const std::filesystem::path& path) const
         { 
             Actions actions; 
             actions.reserve(1000); 
@@ -184,7 +186,7 @@ using Actions = std::vector<Action>;
                 else 
                 { 
                     if (!file.eof())
-                        throw std::logic_error("Result line must be at end of file!")
+                        throw std::logic_error("Result line must be at end of file!");
 
                     Result result; 
                     ParseResult(line, result); 
@@ -197,24 +199,26 @@ using Actions = std::vector<Action>;
         }
  }; 
 
+ //Testing framework that each test instance inherits from
  class OrderbookTestsFixture : public testing::TestWithParam<const char*>
  { 
-    private: 
+    private:  
         const static inline std::filesystem::path Root { 
-            std::filesystem::current_path(); 
-        }
-        const static inline std::filesystem::path TestFolder{ "TestFolder "}; 
+            std::filesystem::current_path()
+        };
+        const static inline std::filesystem::path TestFilesDir{ "Test_Files"}; 
     public: 
-        const static inline std::filesystem::path TestFolderPath{ Root / TestFolder }; 
+        const static inline std::filesystem::path TestFolderPath{ Root / "Testing" / TestFilesDir }; 
  }; 
 
+ //Parametrized test to be used for every input instance 
  TEST_P (OrderbookTestsFixture, OrderbookTestSuite) 
  { 
     //Arrange
-    const auto file = OrderbookTestsFixture::TestFolderPath / GetParam()
+    const auto file = OrderbookTestsFixture::TestFolderPath / GetParam(); 
 
     InputHandler handler; 
-    const auto [actions, result] = handler.GetActions(); 
+    const auto [actions, result] = handler.GetInputInfo(file); 
 
     //Convert text info to an order
     auto GetOrder = [](const Action& action)
@@ -231,12 +235,12 @@ using Actions = std::vector<Action>;
     //Convert text info to an order modify 
     auto GetOrderModify = [](const Action& action)
     { 
-        return std::make_shared<Order>(
+        return OrderModify {
             action.orderId_, 
             action.side_,
             action.price_, 
             action.quantity_
-        ); 
+        }; 
     }; 
 
     //Process actions
@@ -262,16 +266,20 @@ using Actions = std::vector<Action>;
     //Compare against Result 
     const auto& orderbookLevelInfos = orderbook.GetOrderInfos(); 
     ASSERT_EQ(orderbook.Size(), result.allCount_); 
-    ASSERT_EQ(orderbookLevelInfos.GetBids().size(), result.bidCount_); 
-    ASSERT_EQ(orderbookLevelInfos.GetAsks().size(), result.askCount_); 
+    ASSERT_EQ(orderbookLevelInfos.GetBidCount(), result.bidCount_); 
+    ASSERT_EQ(orderbookLevelInfos.GetAskCount(), result.askCount_); 
  }
 
+ //Creates a derived fixture instance for every specified file 
  INSTANTIATE_TEST_SUITE_P(Tests, OrderbookTestsFixture, testing::ValuesIn({ 
-    "Match_GoodTillCancel.txt",
-    "Match_FillAndKill.txt", 
-    "Match_FILLOrKill_Miss.txt", 
     "Cancel_Success.txt", 
-    "Modify_Side.txt", 
-    "Match_Market.txt"
+    "Match_FillAndKill.txt", 
+    "Match_FillOrKill_Hit.txt",
+    "Match_FillOrKill_Miss.txt", 
+    "Match_GoodTillCancel.txt",
+    "Match_Market.txt",
+    "Modify_Price.txt", 
+    "Modify_Side.txt",
+    "NoMatch_GoodTillCancel.txt"
     })); 
   
