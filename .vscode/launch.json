@@ -1,17 +1,17 @@
 {
     "configurations": [
         {
-            "name": "C/C++: clang build and debug active file",
+            "name": "Build and Debug Tests",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}/${fileBasenameNoExtension}",
-            "args": [],
+            "program": "${workspaceFolder}/build/test_runner",
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
+            "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "preLaunchTask": "C/C++: clang build active file"
+            "targetArchitecture": "arm64", 
+            "preLaunchTask": "Build Tests"
         }
     ],
     "version": "2.0.0"

@@ -32,13 +32,16 @@
         "-fansi-escape-codes",
         "-g",
         "-pthread",                             
-        "-I${workspaceFolder}/include",       
+        "-I${workspaceFolder}/include",    
+        "-I${workspaceFolder}/External/googletest",
         "-I${workspaceFolder}/External/googletest/include",  
                                                
         "-I${workspaceFolder}/Testing",        
         "${workspaceFolder}/Testing/*.cpp",  
-        "${workspaceFolder}/src/*.cpp",         
-        "${workspaceFolder}/External/build/lib/libgtest.a",
+        "${workspaceFolder}/src/*.cpp",       
+ 
+        "${workspaceFolder}/External/googletest/src/gtest-all.cc",
+        "${workspaceFolder}/External/googletest/src/gtest_main.cc",
                                                 
         "-o",
         "${workspaceFolder}/build/test_runner" 

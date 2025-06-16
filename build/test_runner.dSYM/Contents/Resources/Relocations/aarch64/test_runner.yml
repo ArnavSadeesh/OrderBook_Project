@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/arnavsadeesh/Desktop/CPP/OrderBook_Project/build/test_runner'
+relocations:     []
+...
