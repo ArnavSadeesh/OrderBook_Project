@@ -1,12 +1,10 @@
 #include "Orderbook.h"
 
-#include <numeric>
 #include <ctime>
 #include <chrono>
-#include <iostream>
 
 void Orderbook::PruneGoodForDayOrders()
-{
+{ 
     using namespace std::chrono;
     //4 PM Pruning
     const auto end = hours(16); 
@@ -191,15 +189,15 @@ Trades Orderbook::MatchOrders()
     while (true) {
         if (bids_.empty() || asks_.empty())
             break; 
-        auto&  [bidPrice, bids] = *bids_.begin(); 
-        auto&  [askPrice, asks] = *asks_.begin(); 
+        auto& [bidPrice, bids] = *bids_.begin(); 
+        auto& [askPrice, asks] = *asks_.begin(); 
 
         if (bidPrice < askPrice)
             break; 
         
         while (bids.size() && asks.size()) {
-            auto& bid = bids.front(); 
-            auto& ask = asks.front(); 
+            auto bid = bids.front(); 
+            auto ask = asks.front(); 
 
             Quantity quantity = std::min(bid->GetRemainingQuantity(), 
             ask->GetRemainingQuantity()); 
@@ -231,19 +229,28 @@ Trades Orderbook::MatchOrders()
         }
 
         if (bids.empty())
-            bids_.erase(bidPrice); 
-        else
-            asks_.erase(askPrice); 
+        {
+            bids_.erase(bidPrice);
+            data_.erase(bidPrice);
+        }
+
+        if (asks.empty())
+        {
+            asks_.erase(askPrice);
+            data_.erase(askPrice);
+        }
     }
 
-    if (!bids_.empty()) { 
+    if (!bids_.empty()) 
+    { 
         auto& [_, bids] = *bids_.begin(); 
         auto& order =  bids.front(); 
         if (order->GetOrderType() == OrderType::FillAndKill)
             CancelOrder(order->GetOrderId()); 
     }
 
-    if (!asks_.empty()) { 
+    if (!asks_.empty()) 
+    { 
         auto& [_, asks] = *asks_.begin(); 
         auto& order =  asks.front(); 
         if (order->GetOrderType() == OrderType::FillAndKill)
@@ -373,8 +380,9 @@ OrderbookLevelInfos Orderbook::GetOrderInfos() const
                         [](Quantity runningSum, const auto& order)
                         {
                             return runningSum + order->GetRemainingQuantity(); 
-                        })
-        }; 
+                        }), 
+        (Quantity) orders.size()
+        };
     }; 
 
     for (const auto& [price, orders] : bids_)
@@ -385,6 +393,5 @@ OrderbookLevelInfos Orderbook::GetOrderInfos() const
 
 
     return OrderbookLevelInfos { bidInfos, askInfos }; 
-
 }
 
